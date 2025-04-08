@@ -33,3 +33,10 @@
      ```
 
 ---
+# How to contribute
+
+- We should not commit any changes to the `main` branch, this branch serves solely for purposes of getting latest `chromium` changes and merging them later into our `development` branch
+- In order to add new feature you can either create new branch `feature/feature-name` and merge it later into the `development` branch or just commit to the `development` branch
+-  How to get the latest chromium changes and merge them into our `development` branch ?
+	- find out and write here about it
+	
