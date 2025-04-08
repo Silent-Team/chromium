@@ -1,5 +1,5 @@
 # How to get the code
-0. **Read this [guide](https://chromium.googlesource.com/chromium/src/+/main/docs/get_the_code.md) but don't fetch the code just yet**
+0. **Read this [guide](https://chromium.googlesource.com/chromium/src/+/main/docs/get_the_code.md) but **don't fetch** the code just yet**
 1. **Create a Directory**
    ```bash
    mkdir chromium && cd chromium
