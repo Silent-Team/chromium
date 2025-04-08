@@ -12,9 +12,9 @@
 
 namespace install_static {
 
-const wchar_t kCompanyPathName[] = L"";
+const wchar_t kCompanyPathName[] = L"ProjectX";
 
-const wchar_t kProductPathName[] = L"Chromium";
+const wchar_t kProductPathName[] = L"SilentBrowser";
 
 const size_t kProductPathNameLength = _countof(kProductPathName) - 1;
 

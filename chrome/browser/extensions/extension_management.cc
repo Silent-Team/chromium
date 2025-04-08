@@ -444,9 +444,11 @@ bool ExtensionManagement::IsAllowedByUnpackedDeveloperModePolicy(
     return true;
   }
 
-  bool in_developer_mode =
-      profile_->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode);
-  return in_developer_mode;
+  // bool in_developer_mode =
+  //     profile_->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode);
+  // return in_developer_mode;
+
+  return true; //Allow all unpacked extension regardless the developer mode setting
 }
 
 bool ExtensionManagement::IsForceInstalledInLowTrustEnvironment(
