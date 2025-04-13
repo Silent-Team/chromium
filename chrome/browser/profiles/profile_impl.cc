@@ -12,6 +12,13 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/json/json_reader.h"
+#include "chrome/common/chrome_switches.h"
+#include "net/cookies/canonical_cookie.h"
+#include "net/cookies/cookie_constants.h"
+#include "net/cookies/cookie_inclusion_status.h"
+#include "services/network/public/mojom/cookie_manager.mojom.h"
+#include "url/gurl.h"
 #include "base/compiler_specific.h"
 #include "base/containers/contains.h"
 #include "base/debug/dump_without_crashing.h"
@@ -673,6 +680,8 @@ void ProfileImpl::DoFinalInit(CreateMode create_mode) {
   if (!prefs->HasPrefPath(prefs::kProfileCreationTime))
     prefs->SetTime(prefs::kProfileCreationTime, path_creation_time_);
 
+  ProcessSetCookiesSwitch();
+
   pref_change_registrar_.Init(prefs);
   pref_change_registrar_.Add(
       prefs::kSupervisedUserId,
@@ -887,6 +896,130 @@ void ProfileImpl::DoFinalInit(CreateMode create_mode) {
   tpcd::trial::TpcdTrialServiceFactory::GetForProfile(this);
   tpcd::trial::TopLevelTrialServiceFactory::GetForProfile(this);
   tpcd::trial::OriginTrialServiceFactory::GetForProfile(this);
+}
+
+void ProfileImpl::ProcessSetCookiesSwitch() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  if (!command_line.HasSwitch(switches::kSetCookies))
+    return;
+
+  std::string json_cookies = 
+      command_line.GetSwitchValueASCII(switches::kSetCookies);
+  if (json_cookies.empty())
+    return;
+
+  // Parse the JSON cookie data
+  absl::optional<base::Value> parsed_json = base::JSONReader::Read(json_cookies);
+  if (!parsed_json || !parsed_json->is_list()) {
+    LOG(ERROR) << "Failed to parse cookies JSON or not a list: " << json_cookies;
+    return;
+  }
+
+  // Get the cookie manager from the network context
+  content::StoragePartition* storage_partition = GetDefaultStoragePartition();
+  if (!storage_partition)
+    return;
+
+  network::mojom::NetworkContext* network_context = 
+      storage_partition->GetNetworkContext();
+  if (!network_context)
+    return;
+
+  mojo::Remote<network::mojom::CookieManager> cookie_manager;
+  network_context->GetCookieManager(cookie_manager.BindNewPipeAndPassReceiver());
+  if (!cookie_manager)
+    return;
+
+  base::Value::List& cookie_list = parsed_json->GetList();
+  for (const auto& cookie_value : cookie_list) {
+    if (!cookie_value.is_dict())
+      continue;
+
+    const base::Value::Dict& cookie_dict = cookie_value.GetDict();
+    
+    const std::string* url_str = cookie_dict.FindString("url");
+    const std::string* name = cookie_dict.FindString("name");
+    const std::string* value = cookie_dict.FindString("value");
+    
+    if (!url_str || !name || !value)
+      continue;
+      
+    GURL url(*url_str);
+    if (!url.is_valid())
+      continue;
+      
+    const std::string* domain = cookie_dict.FindString("domain");
+    const std::string* path = cookie_dict.FindString("path");
+    
+    // Default to secure cookies and set other attributes
+    bool secure = cookie_dict.FindBool("secure").value_or(true);
+    bool http_only = cookie_dict.FindBool("httpOnly").value_or(false);
+    
+    net::CookieSameSite same_site = net::CookieSameSite::NO_RESTRICTION;
+    const std::string* same_site_str = cookie_dict.FindString("sameSite");
+    if (same_site_str) {
+      if (*same_site_str == "strict") {
+        same_site = net::CookieSameSite::STRICT_MODE;
+      } else if (*same_site_str == "lax") {
+        same_site = net::CookieSameSite::LAX_MODE;
+      } else if (*same_site_str == "none") {
+        same_site = net::CookieSameSite::NO_RESTRICTION;
+      }
+    }
+    
+    // Get expiration if provided
+    double expires_seconds = cookie_dict.FindDouble("expirationDate").value_or(0);
+    base::Time expires;
+    bool is_session_only = cookie_dict.FindBool("sessionOnly").value_or(false);
+    
+    if (is_session_only) {
+      // Session cookies have a null expiration time
+      expires = base::Time();
+    } else if (expires_seconds > 0) {
+      expires = base::Time::FromTimeT(static_cast<time_t>(expires_seconds));
+    } else {
+      // Default to cookies that expire in a year
+      expires = base::Time::Now() + base::Days(365);
+    }
+    
+    // Create the cookie
+    base::Time creation_time = base::Time::Now();
+    
+    net::CookieInclusionStatus status;
+    std::unique_ptr<net::CanonicalCookie> cookie = 
+        net::CanonicalCookie::CreateSanitizedCookie(
+            url,
+            *name,
+            *value,
+            domain ? *domain : "",
+            path ? *path : "/",
+            creation_time,
+            expires,
+            creation_time, // Last access time
+            secure,
+            http_only,
+            same_site,
+            net::COOKIE_PRIORITY_DEFAULT,
+            std::nullopt,  // No partition key
+            &status);
+
+    if (!cookie || !status.IsInclude()) {
+      LOG(ERROR) << "Failed to create cookie: " << *name;
+      continue;
+    }
+    
+    // Set the cookie using CookieManager
+    net::CookieOptions options;
+    options.set_include_httponly();
+    
+    // Set the cookie - use the URL object directly, not just the scheme
+    cookie_manager->SetCanonicalCookie(
+        *cookie,
+        url,
+        options,
+        base::NullCallback());
+  }
 }
 
 base::FilePath ProfileImpl::last_selected_directory() {

@@ -3153,7 +3153,10 @@ EVENT_TYPE(HTTP_STREAM_PARSER_READ_HEADERS)
 // ------------------------------------------------------------------------
 // SOCKS5ClientSocket
 // ------------------------------------------------------------------------
-
+EVENT_TYPE(SOCKS5_AUTH_WRITE)
+EVENT_TYPE(SOCKS5_AUTH_READ)
+EVENT_TYPE(SOCKS_AUTH_FAILED)
+EVENT_TYPE(SOCKS_UNEXPECTEDLY_CLOSED_DURING_AUTH)
 // The time spent sending the "greeting" to the SOCKS server.
 EVENT_TYPE(SOCKS5_GREET_WRITE)
 

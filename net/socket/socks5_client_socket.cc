@@ -8,13 +8,15 @@
 
 #include <array>
 #include <utility>
-
+#include "base/logging.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/format_macros.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/numerics/byte_conversions.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "net/base/io_buffer.h"
 #include "net/base/sys_addrinfo.h"
@@ -24,7 +26,7 @@
 #include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace net {
-
+// Constants
 const unsigned int SOCKS5ClientSocket::kGreetReadHeaderSize = 2;
 const unsigned int SOCKS5ClientSocket::kWriteHeaderSize = 10;
 const unsigned int SOCKS5ClientSocket::kReadHeaderSize = 5;
@@ -44,7 +46,19 @@ SOCKS5ClientSocket::SOCKS5ClientSocket(
       transport_socket_(std::move(transport_socket)),
       destination_(destination),
       net_log_(transport_socket_->NetLog()),
-      traffic_annotation_(traffic_annotation) {}
+      traffic_annotation_(traffic_annotation) {
+          char* auth_env = getenv("SOCKS5_AUTH");
+          if (auth_env) {
+            std::string auth_str(auth_env);
+            size_t colon_pos = auth_str.find(':');
+            if (colon_pos != std::string::npos) {
+              username_ = auth_str.substr(0, colon_pos);
+              password_ = auth_str.substr(colon_pos + 1);
+              has_auth_ = true;
+            }
+          }
+        LOG(INFO) << "SOCKS5 auth loaded from env";
+}
 
 SOCKS5ClientSocket::~SOCKS5ClientSocket() {
   Disconnect();
@@ -224,6 +238,26 @@ int SOCKS5ClientSocket::DoLoop(int last_io_result) {
         net_log_.EndEventWithNetErrorCode(NetLogEventType::SOCKS5_GREET_READ,
                                           rv);
         break;
+      case STATE_AUTH_WRITE:
+        DCHECK_EQ(OK, rv);
+        net_log_.BeginEvent(NetLogEventType::SOCKS5_AUTH_WRITE);
+        rv = DoAuthWrite();
+        break;
+      case STATE_AUTH_WRITE_COMPLETE:
+        rv = DoAuthWriteComplete(rv);
+        net_log_.EndEventWithNetErrorCode(NetLogEventType::SOCKS5_AUTH_WRITE,
+                                          rv);
+        break;
+      case STATE_AUTH_READ:
+        DCHECK_EQ(OK, rv);
+        net_log_.BeginEvent(NetLogEventType::SOCKS5_AUTH_READ);
+        rv = DoAuthRead();
+        break;
+      case STATE_AUTH_READ_COMPLETE:
+        rv = DoAuthReadComplete(rv);
+        net_log_.EndEventWithNetErrorCode(NetLogEventType::SOCKS5_AUTH_READ,
+                                          rv);
+        break;
       case STATE_HANDSHAKE_WRITE:
         DCHECK_EQ(OK, rv);
         net_log_.BeginEvent(NetLogEventType::SOCKS5_HANDSHAKE_WRITE);
@@ -251,9 +285,6 @@ int SOCKS5ClientSocket::DoLoop(int last_io_result) {
   return rv;
 }
 
-static constexpr std::array<uint8_t, 3> kSOCKS5GreetWriteData{
-    0x05, 0x01, 0x00};  // no authentication
-
 int SOCKS5ClientSocket::DoGreetWrite() {
   // Since we only have 1 byte to send the hostname length in, if the
   // URL has a hostname longer than 255 characters we can't send it.
@@ -263,8 +294,16 @@ int SOCKS5ClientSocket::DoGreetWrite() {
   }
 
   if (!write_buf_) {
-    auto greet_buffer =
-        base::MakeRefCounted<WrappedIOBuffer>(kSOCKS5GreetWriteData);
+    std::vector<uint8_t> greet;
+    
+    // If we have authentication, offer both no-auth and username/password methods
+    if (has_auth_) {
+      greet = {0x05, 0x02, 0x00, 0x02};  // SOCKS5, 2 methods: no auth (0x00) and username/password (0x02)
+    } else {
+      greet = {0x05, 0x01, 0x00};  // SOCKS5, 1 method: no auth (0x00)
+    }
+    
+    auto greet_buffer = base::MakeRefCounted<VectorIOBuffer>(std::move(greet));
     write_buf_ = base::MakeRefCounted<DrainableIOBuffer>(
         std::move(greet_buffer), greet_buffer->size());
   }
@@ -323,15 +362,127 @@ int SOCKS5ClientSocket::DoGreetReadComplete(int result) {
                                    "version", read_data[0]);
     return ERR_SOCKS_CONNECTION_FAILED;
   }
-  if (read_data[1] != 0x00) {
+  
+  //check server's auth method selection
+  uint8_t chosen_auth = read_data[1];
+  
+  if (chosen_auth == 0x00) {
+    //no auth needed
+    read_buf_.reset();
+    next_state_ = STATE_HANDSHAKE_WRITE;
+    return OK;
+  } else if (chosen_auth == 0x02 && has_auth_) {
+    // username/password auth
+    read_buf_.reset();
+    next_state_ = STATE_AUTH_WRITE;
+    return OK;
+  } else {
+    //unsupported
     net_log_.AddEventWithIntParams(NetLogEventType::SOCKS_UNEXPECTED_AUTH,
-                                   "method", read_data[1]);
+                                  "method", chosen_auth);
     return ERR_SOCKS_CONNECTION_FAILED;
+  }
+}
+
+int SOCKS5ClientSocket::DoAuthWrite() {
+  if (!write_buf_) {
+    write_buf_ = BuildAuthBuffer();
+  }
+
+  next_state_ = STATE_AUTH_WRITE_COMPLETE;
+  return transport_socket_->Write(write_buf_.get(),
+                                 write_buf_->BytesRemaining(), io_callback_,
+                                 traffic_annotation_);
+}
+
+int SOCKS5ClientSocket::DoAuthWriteComplete(int result) {
+  if (result < 0)
+    return result;
+
+  write_buf_->DidConsume(result);
+  if (write_buf_->BytesRemaining() == 0) {
+    write_buf_.reset();
+    next_state_ = STATE_AUTH_READ;
+  } else {
+    next_state_ = STATE_AUTH_WRITE;
+  }
+  return OK;
+}
+
+int SOCKS5ClientSocket::DoAuthRead() {
+  next_state_ = STATE_AUTH_READ_COMPLETE;
+  if (!read_buf_) {
+    read_buf_ = base::MakeRefCounted<GrowableIOBuffer>();
+    read_buf_->SetCapacity(2);  //Auth response is 2 bytes
+  }
+  return transport_socket_->Read(read_buf_.get(),
+                                read_buf_->RemainingCapacity(), io_callback_);
+}
+
+int SOCKS5ClientSocket::DoAuthReadComplete(int result) {
+  if (result < 0)
+    return result;
+
+  if (result == 0) {
+    net_log_.AddEvent(
+        NetLogEventType::SOCKS_UNEXPECTEDLY_CLOSED_DURING_AUTH);
+    return ERR_SOCKS_CONNECTION_FAILED;
+  }
+
+  read_buf_->set_offset(read_buf_->offset() + result);
+  if (read_buf_->RemainingCapacity() > 0) {
+    next_state_ = STATE_AUTH_READ;
+    return OK;
+  }
+
+  base::span<uint8_t> read_data = read_buf_->span_before_offset();
+
+  // For username/password auth:
+  // First byte is version (should be 0x01)
+  // Second byte is status (0x00 = success, non-zero = failure)
+  if (read_data[0] != 0x01) {
+    net_log_.AddEventWithIntParams(NetLogEventType::SOCKS_UNEXPECTED_VERSION,
+                                  "auth_version", read_data[0]);
+    return ERR_SOCKS_CONNECTION_FAILED;
+  }
+  
+  if (read_data[1] != 0x00) {
+    net_log_.AddEventWithIntParams(NetLogEventType::SOCKS_AUTH_FAILED,
+                                  "auth_status", read_data[1]);
+    return ERR_PROXY_AUTH_REQUESTED;
   }
 
   read_buf_.reset();
   next_state_ = STATE_HANDSHAKE_WRITE;
   return OK;
+}
+
+scoped_refptr<DrainableIOBuffer> SOCKS5ClientSocket::BuildAuthBuffer() const {
+  std::vector<uint8_t> auth_data;
+  //https://datatracker.ietf.org/doc/html/rfc1928
+  // Username/password auth packet format:
+  // +----+------+----------+------+----------+
+  // |VER | ULEN |  UNAME   | PLEN |  PASSWD  |
+  // +----+------+----------+------+----------+
+  // | 1  |  1   | 1 to 255 |  1   | 1 to 255 |
+  // +----+------+----------+------+----------+
+  
+  // 0x01 is the username/password auth version
+  auth_data.push_back(0x01);
+  
+  //username length and username
+  uint8_t ulen = static_cast<uint8_t>(username_.size());
+  auth_data.push_back(ulen);
+  auth_data.insert(auth_data.end(), username_.begin(), username_.end());
+  
+  //password length and password
+  uint8_t plen = static_cast<uint8_t>(password_.size());
+  auth_data.push_back(plen);
+  auth_data.insert(auth_data.end(), password_.begin(), password_.end());
+  
+  auto auth_buffer = base::MakeRefCounted<VectorIOBuffer>(std::move(auth_data));
+  return base::MakeRefCounted<DrainableIOBuffer>(std::move(auth_buffer),
+                                               auth_buffer->size());
 }
 
 scoped_refptr<DrainableIOBuffer> SOCKS5ClientSocket::BuildHandshakeWriteBuffer()

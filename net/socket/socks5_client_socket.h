@@ -1,7 +1,3 @@
-// Copyright 2012 The Chromium Authors
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 #ifndef NET_SOCKET_SOCKS5_CLIENT_SOCKET_H_
 #define NET_SOCKET_SOCKS5_CLIENT_SOCKET_H_
 
@@ -13,6 +9,8 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "net/base/address_list.h"
+#include "base/command_line.h"
+#include "base/strings/string_util.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/completion_repeating_callback.h"
 #include "net/base/host_port_pair.h"
@@ -29,7 +27,6 @@ class DrainableIOBuffer;
 class GrowableIOBuffer;
 
 // This StreamSocket is used to setup a SOCKSv5 handshake with a socks proxy.
-// Currently no SOCKSv5 authentication is supported.
 class NET_EXPORT_PRIVATE SOCKS5ClientSocket : public StreamSocket {
  public:
   // |destination| contains the hostname and port to which the socket above will
@@ -83,6 +80,10 @@ class NET_EXPORT_PRIVATE SOCKS5ClientSocket : public StreamSocket {
     STATE_GREET_WRITE_COMPLETE,
     STATE_GREET_READ,
     STATE_GREET_READ_COMPLETE,
+    STATE_AUTH_WRITE,
+    STATE_AUTH_WRITE_COMPLETE,
+    STATE_AUTH_READ,
+    STATE_AUTH_READ_COMPLETE,
     STATE_HANDSHAKE_WRITE,
     STATE_HANDSHAKE_WRITE_COMPLETE,
     STATE_HANDSHAKE_READ,
@@ -117,9 +118,20 @@ class NET_EXPORT_PRIVATE SOCKS5ClientSocket : public StreamSocket {
   int DoGreetReadComplete(int result);
   int DoGreetWrite();
   int DoGreetWriteComplete(int result);
+  int DoAuthWrite();
+  int DoAuthWriteComplete(int result);
+  int DoAuthRead();
+  int DoAuthReadComplete(int result);
 
   // Creates a DrainableIOBuffer containing the SOCKS handshake.
   scoped_refptr<DrainableIOBuffer> BuildHandshakeWriteBuffer() const;
+
+  // Creates a DrainableIOBuffer containing the SOCKS authentication.
+  scoped_refptr<DrainableIOBuffer> BuildAuthBuffer() const;
+
+  // Gets credentials from command line if they exist.
+  // Returns true if credentials were found, false otherwise.
+  bool GetCredentialsFromCommandLine();
 
   CompletionRepeatingCallback io_callback_;
 
@@ -150,6 +162,11 @@ class NET_EXPORT_PRIVATE SOCKS5ClientSocket : public StreamSocket {
 
   // Traffic annotation for socket control.
   NetworkTrafficAnnotationTag traffic_annotation_;
+
+  // Authentication credentials
+  bool has_auth_ = false;
+  std::string username_;
+  std::string password_;
 };
 
 }  // namespace net

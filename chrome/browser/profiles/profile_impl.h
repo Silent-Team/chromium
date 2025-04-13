@@ -186,6 +186,7 @@ class ProfileImpl : public Profile {
 
   // Does final initialization. Should be called after prefs were loaded.
   void DoFinalInit(CreateMode create_mode);
+  void ProcessSetCookiesSwitch();
 
   // Switch locale (when possible) and proceed to OnLocaleReady().
   void OnPrefsLoaded(CreateMode create_mode, bool success);

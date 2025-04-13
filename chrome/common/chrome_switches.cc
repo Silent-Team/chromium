@@ -23,6 +23,7 @@ namespace switches {
 // Specifies Accept-Language to send to servers and expose to JavaScript via the
 // navigator.language DOM property. language[-country] where language is the 2
 // letter code from ISO-639.
+const char kSetCookies[] = "set-cookies";
 const char kAcceptLang[] = "accept-lang";
 
 // Allows third-party content included on a page to prompt for a HTTP basic
