@@ -846,6 +846,7 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
              name:NSWorkspaceWillPowerOffNotification
            object:nil];
 
+  chrome::mac::LoadCustomAppIconFromUserDataDir();
   // Set up the command updater for when there are no windows open
   [self initMenuState];
 
@@ -1139,7 +1140,6 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
     return;
   }
 
-  chrome::mac::LoadCustomAppIconFromUserDataDir();
   // Notify BrowserList to keep the application running so it doesn't go away
   // when all the browser windows get closed.
   _keepAlive = std::make_unique<ScopedKeepAlive>(

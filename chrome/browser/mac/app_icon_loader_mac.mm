@@ -36,5 +36,24 @@ base::FilePath GetCustomIconPathFromUserDataDir() {
   return icon_path;
 }
 
+bool LoadCustomAppIconFromUserDataDir() {
+  base::FilePath custom_icon_path = GetCustomIconPathFromUserDataDir();
+  if (custom_icon_path.empty()) {
+    return false;
+  }
+
+  NSString* icon_path_ns = base::apple::FilePathToNSString(custom_icon_path);
+  NSImage* custom_icon = [[NSImage alloc] initWithContentsOfFile:icon_path_ns];
+  
+  if (!custom_icon) {
+    NSLog(@"Failed to load custom icon from %@", icon_path_ns);
+    return false;
+  }
+  
+  // Apply the custom icon to the application
+  [NSApp setApplicationIconImage:custom_icon];
+  
+  return true;
+}
 }  // namespace mac
-}  // namespace chrome
+} // namespace chrome
