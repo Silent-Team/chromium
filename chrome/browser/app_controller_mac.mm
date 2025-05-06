@@ -92,6 +92,7 @@
 #include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app_helpers.h"
+#include "chrome/browser/mac/app_icon_loader_mac.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -1138,6 +1139,7 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
     return;
   }
 
+  chrome::mac::LoadCustomAppIconFromUserDataDir();
   // Notify BrowserList to keep the application running so it doesn't go away
   // when all the browser windows get closed.
   _keepAlive = std::make_unique<ScopedKeepAlive>(

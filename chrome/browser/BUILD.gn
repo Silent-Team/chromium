@@ -6416,6 +6416,8 @@ static_library("browser") {
       "lifetime/application_lifetime_mac.mm",
       "mac/auth_session_request.h",
       "mac/auth_session_request.mm",
+      "mac/app_icon_loader_mac.h",
+      "mac/app_icon_loader_mac.mm",
       "mac/bluetooth_utility.h",
       "mac/bluetooth_utility.mm",
       "mac/chrome_browser_main_extra_parts_mac.h",
