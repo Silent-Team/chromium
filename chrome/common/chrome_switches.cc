@@ -24,6 +24,11 @@ namespace switches {
 // navigator.language DOM property. language[-country] where language is the 2
 // letter code from ISO-639.
 const char kSetCookies[] = "set-cookies";
+
+const char kIconPath[] = "icon-path";
+
+const char kSetName[] = "set-name";
+
 const char kAcceptLang[] = "accept-lang";
 
 // Allows third-party content included on a page to prompt for a HTTP basic

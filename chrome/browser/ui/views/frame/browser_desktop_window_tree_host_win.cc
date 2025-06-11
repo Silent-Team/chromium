@@ -9,6 +9,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
@@ -34,6 +35,7 @@
 #include "chrome/browser/win/app_icon.h"
 #include "chrome/browser/win/titlebar_config.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_switches.h"
 #include "components/policy/core/common/policy_pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/mojom/window_show_state.mojom.h"
@@ -598,33 +600,42 @@ SkBitmap GetBadgedIconBitmapForProfile(Profile* profile) {
 void BrowserDesktopWindowTreeHostWin::SetWindowIcon(bool badged) {
   // Hold onto the previous icon so that the currently displayed
   // icon is valid until replaced with the new icon.
-   LOG(ERROR) << "set icon called";
+  LOG(ERROR) << "set icon called";
   base::win::ScopedGDIObject<HICON> previous_icon = std::move(icon_handle_);
-  // If the profile folder contains an on-disk .ico, use that as the window icon.
+  // If the profile folder contains an on-disk .ico, use that as the window
+  // icon.
   Profile* profile = browser_view_->browser()->profile();
-  const base::FilePath profile_icon_path =
-        profile->GetPath().Append(FILE_PATH_LITERAL("icon.ico"));
-        LOG(ERROR) << "path generated";
-    if (base::PathExists(profile_icon_path)) {
-        LOG(ERROR) << "path found";
+  base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
 
-      // Load whichever sizes the .ico contains.
-      HICON custom = static_cast<HICON>(
-          LoadImage(nullptr,
-                    profile_icon_path.value().c_str(),
-                    IMAGE_ICON,
-                    0, 0,  // use icon's own dimensions
-                    LR_LOADFROMFILE | LR_DEFAULTSIZE | LR_SHARED));
-      if (custom) {
-        LOG(ERROR) << "image found";
+  base::FilePath profile_icon_path =
+      profile->GetPath().Append(FILE_PATH_LITERAL("icon.ico"));
+  LOG(ERROR) << "looking for icon at: "
+             << profile_icon_path.value();
 
-        icon_handle_.reset(custom);
-        SendMessage(GetHWND(), WM_SETICON, ICON_SMALL,
-                    reinterpret_cast<LPARAM>(icon_handle_.get()));
-        SendMessage(GetHWND(), WM_SETICON, ICON_BIG,
-                    reinterpret_cast<LPARAM>(icon_handle_.get()));
-        return;
-      }
+  if (cmd->HasSwitch(switches::kIconPath)) {
+    profile_icon_path = cmd->GetSwitchValuePath(switches::kIconPath);
+    LOG(ERROR) << "detected --icon-path switch: "
+               << profile_icon_path.value();
+  }
+
+  if (base::PathExists(profile_icon_path)) {
+    LOG(ERROR) << "path found";
+
+    // Load whichever sizes the .ico contains.
+    HICON custom = static_cast<HICON>(
+        LoadImage(nullptr, profile_icon_path.value().c_str(), IMAGE_ICON, 0,
+                  0,  // use icon's own dimensions
+                  LR_LOADFROMFILE | LR_DEFAULTSIZE | LR_SHARED));
+    if (custom) {
+      LOG(ERROR) << "image found";
+
+      icon_handle_.reset(custom);
+      SendMessage(GetHWND(), WM_SETICON, ICON_SMALL,
+                  reinterpret_cast<LPARAM>(icon_handle_.get()));
+      SendMessage(GetHWND(), WM_SETICON, ICON_BIG,
+                  reinterpret_cast<LPARAM>(icon_handle_.get()));
+      return;
+    }
   }
 
   if (badged) {
