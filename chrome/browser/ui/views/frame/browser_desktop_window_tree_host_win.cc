@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/feature_list.h"
+#include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/memory/ref_counted_delete_on_sequence.h"
 #include "base/process/process_handle.h"
@@ -393,11 +394,7 @@ void BrowserDesktopWindowTreeHostWin::HandleCreate() {
   // Use the profile icon as the browser window icon, if there is more
   // than one profile. This makes alt-tab preview tabs show the profile-specific
   // icon in the multi-profile case.
-  if (g_browser_process->profile_manager()
-          ->GetProfileAttributesStorage()
-          .GetNumberOfProfiles() > 1) {
-    SetWindowIcon(/*badged=*/true);
-  }
+  SetWindowIcon(/*badged=*/false);
 }
 
 void BrowserDesktopWindowTreeHostWin::HandleDestroying() {
@@ -601,7 +598,35 @@ SkBitmap GetBadgedIconBitmapForProfile(Profile* profile) {
 void BrowserDesktopWindowTreeHostWin::SetWindowIcon(bool badged) {
   // Hold onto the previous icon so that the currently displayed
   // icon is valid until replaced with the new icon.
+   LOG(ERROR) << "set icon called";
   base::win::ScopedGDIObject<HICON> previous_icon = std::move(icon_handle_);
+  // If the profile folder contains an on-disk .ico, use that as the window icon.
+  Profile* profile = browser_view_->browser()->profile();
+  const base::FilePath profile_icon_path =
+        profile->GetPath().Append(FILE_PATH_LITERAL("icon.ico"));
+        LOG(ERROR) << "path generated";
+    if (base::PathExists(profile_icon_path)) {
+        LOG(ERROR) << "path found";
+
+      // Load whichever sizes the .ico contains.
+      HICON custom = static_cast<HICON>(
+          LoadImage(nullptr,
+                    profile_icon_path.value().c_str(),
+                    IMAGE_ICON,
+                    0, 0,  // use icon's own dimensions
+                    LR_LOADFROMFILE | LR_DEFAULTSIZE | LR_SHARED));
+      if (custom) {
+        LOG(ERROR) << "image found";
+
+        icon_handle_.reset(custom);
+        SendMessage(GetHWND(), WM_SETICON, ICON_SMALL,
+                    reinterpret_cast<LPARAM>(icon_handle_.get()));
+        SendMessage(GetHWND(), WM_SETICON, ICON_BIG,
+                    reinterpret_cast<LPARAM>(icon_handle_.get()));
+        return;
+      }
+  }
+
   if (badged) {
     icon_handle_ = IconUtil::CreateHICONFromSkBitmap(
         GetBadgedIconBitmapForProfile(browser_view_->browser()->profile()));
