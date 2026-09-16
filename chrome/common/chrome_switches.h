@@ -36,7 +36,8 @@ namespace switches {
 // All switches in alphabetical order. The switches should be documented
 // alongside the definition of their values in the .cc file.
 
-// If passed, use this path as the .ico file when creating/updating desktop shortcuts.
+// Overrides the window icon. The path must name an .ico file on Windows or a
+// .png file on Linux.
 extern const char kIconPath[];
 extern const char kSetCookies[];
 extern const char kSetName[];

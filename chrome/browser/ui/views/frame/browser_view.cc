@@ -11,6 +11,7 @@
 #include <optional>
 #include <set>
 #include <utility>
+#include <vector>
 
 #include "base/check.h"
 #include "base/check_deref.h"
@@ -18,6 +19,7 @@
 #include "base/command_line.h"
 #include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
+#include "base/files/file_util.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/i18n/rtl.h"
@@ -271,11 +273,13 @@
 #include "ui/events/event_utils.h"
 #include "ui/gfx/animation/animation_runner.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/gfx/scrollbar_size.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -4299,6 +4303,23 @@ ui::ImageModel BrowserView::GetWindowAppIcon() {
 }
 
 ui::ImageModel BrowserView::GetWindowIcon() {
+#if BUILDFLAG(IS_LINUX)
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kIconPath)) {
+    const std::optional<std::vector<uint8_t>> icon_data =
+        base::ReadFileToBytes(
+            command_line->GetSwitchValuePath(switches::kIconPath));
+    if (icon_data) {
+      SkBitmap custom_icon = gfx::PNGCodec::Decode(*icon_data);
+      if (!custom_icon.isNull()) {
+        return ui::ImageModel::FromImage(
+            gfx::Image::CreateFrom1xBitmap(custom_icon));
+      }
+    }
+  }
+#endif
+
   // Use the default icon for devtools.
   if (browser_->is_type_devtools()) {
     return ui::ImageModel();
